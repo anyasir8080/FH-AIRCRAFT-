@@ -29,7 +29,8 @@ button:disabled{opacity:.5;cursor:wait}
 <h2>Fleet Editor Sign-in</h2>
 <form id="login"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required>
 <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
-<button type="submit">Sign in</button></form>
+<button type="submit">Sign in with password</button></form>
+<button id="email-link" type="button">Email me a sign-in link</button>
 <button id="forgot-password" type="button">Forgot password?</button>
 <form id="reset-password" hidden>
 <label for="new-password">New password</label>
@@ -73,6 +74,7 @@ const form=document.getElementById('update');
 const submitBtn=document.getElementById('submit');
 let db, canWrite=false, savingUpdate=false, savingAircraft=false;
 const login=document.getElementById('login');
+const emailLink=document.getElementById('email-link');
 const forgotPassword=document.getElementById('forgot-password');
 const resetPassword=document.getElementById('reset-password');
 const authLink=new URLSearchParams(location.hash.slice(1));
@@ -89,6 +91,7 @@ function showSession(session){
  canWrite=!recoveryPending&&!recovering&&session?.user?.app_metadata?.fleet_writer===true && session.user.is_anonymous!==true;
  login.hidden=Boolean(session)||recoveryPending||recovering;
  forgotPassword.hidden=login.hidden;
+ emailLink.hidden=login.hidden;
  resetPassword.hidden=!recovering;
  logout.hidden=!session||recovering||recoveryPending;
  loginStatus.textContent=recovering?'Choose a new password.':recoveryPending?'Checking your reset link…':canWrite?'Signed in as fleet editor.':session?'This account has read-only access.':'Sign in with an authorized account to edit the fleet.';
@@ -104,6 +107,27 @@ login.addEventListener('submit',async event=>{
   login.reset();
  }catch(error){loginStatus.textContent='Sign-in failed: '+error.message}
  finally{button.disabled=false}
+});
+emailLink.addEventListener('click',async ()=>{
+ const email=document.getElementById('email');
+ if(!email.reportValidity())return;
+ emailLink.disabled=true;
+ loginStatus.textContent='Requesting sign-in link…';
+ try{
+  const {error}=await db.auth.signInWithOtp({
+   email:email.value.trim(),
+   options:{shouldCreateUser:false,emailRedirectTo:'https://fh-aircraft.vercel.app/'}
+  });
+  if(error){
+   if(error.code==='otp_disabled'||error.code==='signup_disabled'||error.code==='user_not_found'){
+    loginStatus.textContent='Use the email address registered for Fleet FH.';
+    return;
+   }
+   throw error;
+  }
+  loginStatus.textContent='Check your inbox or spam folder and open the sign-in link.';
+ }catch(error){loginStatus.textContent='Could not send sign-in link: '+error.message}
+ finally{emailLink.disabled=false}
 });
 forgotPassword.addEventListener('click',async ()=>{
  const email=document.getElementById('email');
@@ -227,7 +251,7 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
 });
 document.getElementById('refresh').addEventListener('click',loadFleet);
 try{
- db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{detectSessionInUrl:()=>recoveryPending}});
+ db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{detectSessionInUrl:()=>recoveryPending||authLink.get('type')==='magiclink'}});
  db.auth.onAuthStateChange((event,session)=>{
   if(event==='PASSWORD_RECOVERY'){
    recovering=Boolean(session);
@@ -241,7 +265,7 @@ try{
    history.replaceState(history.state,'',location.pathname+location.search);
   }
   showSession(session);
-  if(failedRecovery)loginStatus.textContent='This reset link is invalid or expired. Request a new one.';
+  if(failedRecovery)loginStatus.textContent='This email link is invalid or expired. Request a new one.';
  });
  const refreshWhenIdle=()=>{if(!document.hidden&&!savingAircraft&&!savingUpdate)loadFleet()};
  window.addEventListener('focus',refreshWhenIdle);
