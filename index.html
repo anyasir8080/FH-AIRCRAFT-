@@ -30,6 +30,14 @@ button:disabled{opacity:.5;cursor:wait}
 <form id="login"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required>
 <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
 <button type="submit">Sign in</button></form>
+<button id="forgot-password" type="button">Forgot password?</button>
+<form id="reset-password" hidden>
+<label for="new-password">New password</label>
+<input id="new-password" type="password" autocomplete="new-password" minlength="8" required>
+<label for="confirm-password">Confirm new password</label>
+<input id="confirm-password" type="password" autocomplete="new-password" minlength="8" required>
+<button type="submit">Save new password</button>
+</form>
 <button id="logout" type="button" hidden>Sign out</button><p id="login-status" role="status"></p>
 </section>
 <section>
@@ -65,6 +73,11 @@ const form=document.getElementById('update');
 const submitBtn=document.getElementById('submit');
 let db, canWrite=false, savingUpdate=false, savingAircraft=false;
 const login=document.getElementById('login');
+const forgotPassword=document.getElementById('forgot-password');
+const resetPassword=document.getElementById('reset-password');
+const authLink=new URLSearchParams(location.hash.slice(1));
+let recoveryPending=authLink.get('type')==='recovery';
+let recovering=false;
 const logout=document.getElementById('logout');
 const loginStatus=document.getElementById('login-status');
 const addButton=document.getElementById('add-submit');
@@ -73,10 +86,12 @@ function renderWriteControls(){
  addButton.disabled=!canWrite||savingAircraft;
 }
 function showSession(session){
- canWrite=session?.user?.app_metadata?.fleet_writer===true && session.user.is_anonymous!==true;
- login.hidden=Boolean(session);
- logout.hidden=!session;
- loginStatus.textContent=canWrite?'Signed in as fleet editor.':session?'This account has read-only access.':'Sign in with an authorized account to edit the fleet.';
+ canWrite=!recoveryPending&&!recovering&&session?.user?.app_metadata?.fleet_writer===true && session.user.is_anonymous!==true;
+ login.hidden=Boolean(session)||recoveryPending||recovering;
+ forgotPassword.hidden=login.hidden;
+ resetPassword.hidden=!recovering;
+ logout.hidden=!session||recovering||recoveryPending;
+ loginStatus.textContent=recovering?'Choose a new password.':recoveryPending?'Checking your reset link…':canWrite?'Signed in as fleet editor.':session?'This account has read-only access.':'Sign in with an authorized account to edit the fleet.';
  renderWriteControls();
 }
 login.addEventListener('submit',async event=>{
@@ -84,10 +99,43 @@ login.addEventListener('submit',async event=>{
  const button=login.querySelector('button');
  button.disabled=true;
  try{
-  const {error}=await db.auth.signInWithPassword({email:login.elements.email.value.trim(),password:login.elements.password.value});
+  const {error}=await db.auth.signInWithPassword({email:document.getElementById('email').value.trim(),password:document.getElementById('password').value});
   if(error)throw error;
   login.reset();
  }catch(error){loginStatus.textContent='Sign-in failed: '+error.message}
+ finally{button.disabled=false}
+});
+forgotPassword.addEventListener('click',async ()=>{
+ const email=document.getElementById('email');
+ if(!email.reportValidity())return;
+ forgotPassword.disabled=true;
+ loginStatus.textContent='Requesting reset email…';
+ try{
+  const {error}=await db.auth.resetPasswordForEmail(email.value.trim(),{redirectTo:'https://fh-aircraft.vercel.app/'});
+  if(error)throw error;
+  loginStatus.textContent='If this address is eligible, check your inbox and spam folder for the reset link.';
+ }catch(error){loginStatus.textContent='Could not request reset: '+error.message}
+ finally{forgotPassword.disabled=false}
+});
+resetPassword.addEventListener('submit',async event=>{
+ event.preventDefault();
+ if(!recovering)return;
+ const password=document.getElementById('new-password').value;
+ if(password!==document.getElementById('confirm-password').value){
+  loginStatus.textContent='The passwords do not match.';
+  return;
+ }
+ const button=resetPassword.querySelector('button');
+ button.disabled=true;
+ try{
+  const {error}=await db.auth.updateUser({password});
+  if(error)throw error;
+  recovering=false;
+  resetPassword.reset();
+  const {data:sessionData}=await db.auth.getSession();
+  showSession(sessionData.session);
+  loginStatus.textContent='Password updated.';
+ }catch(error){loginStatus.textContent='Could not update password: '+error.message}
  finally{button.disabled=false}
 });
 logout.addEventListener('click',async ()=>{
@@ -179,8 +227,22 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
 });
 document.getElementById('refresh').addEventListener('click',loadFleet);
 try{
- db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{detectSessionInUrl:false}});
- db.auth.onAuthStateChange((_event,session)=>showSession(session));
+ db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{detectSessionInUrl:()=>recoveryPending}});
+ db.auth.onAuthStateChange((event,session)=>{
+  if(event==='PASSWORD_RECOVERY'){
+   recovering=Boolean(session);
+   recoveryPending=false;
+  }
+  if(event==='SIGNED_OUT')recovering=false;
+  const failedRecovery=(event==='INITIAL_SESSION'&&recoveryPending)||authLink.has('error_code');
+  if(failedRecovery){
+   recoveryPending=false;
+   authLink.delete('error_code');
+   history.replaceState(history.state,'',location.pathname+location.search);
+  }
+  showSession(session);
+  if(failedRecovery)loginStatus.textContent='This reset link is invalid or expired. Request a new one.';
+ });
  const refreshWhenIdle=()=>{if(!document.hidden&&!savingAircraft&&!savingUpdate)loadFleet()};
  window.addEventListener('focus',refreshWhenIdle);
  setInterval(refreshWhenIdle,30000);
