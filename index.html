@@ -79,8 +79,24 @@ form.addEventListener('submit',async e=>{
  submitBtn.disabled=true;status('Saving update...');
  try{
   const {data,error}=await db.rpc('add_fleet_utilization',{p_aircraft:aircraft,p_fh:addFH,p_fc:addFC});
-  if(error)throw error;
-  if(data===false)throw new Error('Aircraft not found');
+  if(error){
+   // PGRST202: function is absent from the exposed PostgREST schema.
+   if(error.code!=='PGRST202')throw error;
+   const {data:current,error:readError}=await db.from('fleet')
+     .select('aircraft,fh,fc,updated_at').eq('aircraft',aircraft).single();
+   if(readError)throw readError;
+   const nextFH=Math.round((Number(current.fh)+addFH)*100)/100;
+   const nextFC=Number(current.fc)+addFC;
+   if(!Number.isSafeInteger(nextFC)||!Number.isFinite(nextFH))
+    throw new Error('Updated utilization is outside the supported range');
+   // Optimistic concurrency check: reject stale edits instead of overwriting them.
+   let update=db.from('fleet').update({fh:nextFH,fc:nextFC})
+     .eq('aircraft',aircraft);
+   update=current.updated_at===null?update.is('updated_at',null):update.eq('updated_at',current.updated_at);
+   const {data:changed,error:writeError}=await update.select('aircraft');
+   if(writeError)throw writeError;
+   if(!changed?.length)throw new Error('Update was not applied. Refresh and retry; check anonymous UPDATE policy if this persists.');
+  }else if(data===false)throw new Error('Aircraft not found');
   form.reset();await loadFleet();
   if(!statusEl.classList.contains('error'))status('Aircraft utilization updated successfully.');
  }catch(err){status('Update failed: '+err.message,true)}
