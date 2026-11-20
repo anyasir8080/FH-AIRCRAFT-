@@ -1,7 +1,204 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FLEET FH & FC</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial;background:#edf5f1;margin:0;padding:20px;color:#164b39}
+header{background:#086448;color:white;padding:24px;border-radius:15px}
+section{background:white;padding:20px;margin-top:20px;border-radius:15px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:14px 6px;text-align:center;border-bottom:1px solid #ddd}
+input,select,button{width:100%;padding:13px;margin:8px 0;border:1px solid #ccc;border-radius:8px;font-size:16px}
+button{background:#086448;color:white;border:0;cursor:pointer}
+button:disabled{opacity:.55;cursor:wait}
+#status{min-height:1.5em;font-size:14px}
+.error{color:#b42318}
+.success{color:#086448}
+</style>
+</head>
+<body>
+<header>
+<small>IRAQI AIRWAYS</small>
+<h1>FLEET FH & FC</h1>
+<p>Continuing Airworthiness Management</p>
+</header>
 
+<section>
+<h2>Fleet Overview</h2>
+<table>
+<thead><tr><th>Aircraft</th><th>FH</th><th>FC</th></tr></thead>
+<tbody id="fleet">
+<tr><td colspan="3">Loading...</td></tr>
+</tbody>
+</table>
+<button id="refresh" type="button">Refresh Fleet Data</button>
+<p id="status" role="status" aria-live="polite"></p>
+</section>
+
+<section>
+<h2>Update Utilization</h2>
+<form id="update">
+<select id="aircraft" required>
+<option>YI-ASM</option>
+<option>YI-ASN</option>
+<option>YI-ASO</option>
+</select>
+<label for="fh">Additional FH</label>
+<input id="fh" type="number" min="0" step="0.01" required>
+<label for="fc">Additional FC</label>
+<input id="fc" type="number" min="0" step="1" required>
+<button id="submit" type="submit">Update Aircraft</button>
+</form>
+</section>
+
+<script>
 const SUPABASE_URL =
-  'https://jlyizhbwjupczzsxvzaf.supabase.co';
+'https://jlyizhbwjupczzsxvzaf.supabase.co';
 
 const SUPABASE_PUBLISHABLE_KEY =
-  'sb_publishable_ccIV5Gkbjg2y5oMd90mMeg_-5bKNRCb';
+'sb_publishable_ccIV5Gkbjg2y5oMd90mMeg_-5bKNRCb';
+
+const headers = {
+  'apikey': SUPABASE_PUBLISHABLE_KEY,
+  'Content-Type': 'application/json'
+};
+
+const fleetBody = document.getElementById('fleet');
+const statusEl = document.getElementById('status');
+const submitButton = document.getElementById('submit');
+
+function status(message, isError=false) {
+  statusEl.textContent = message;
+  statusEl.className = isError ? 'error' : 'success';
+}
+
+async function api(path, options={}) {
+  const response = await fetch(
+    SUPABASE_URL + '/rest/v1/' + path,
+    {
+      ...options,
+      headers: {...headers, ...(options.headers || {})}
+    }
+  );
+
+  if (!response.ok) {
+    let message = 'HTTP ' + response.status;
+    try {
+      const err = await response.json();
+      message = err.message || err.error || message;
+    } catch {}
+    throw new Error(message);
+  }
+
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+async function loadFleet() {
+  try {
+    const rows = await api(
+      'fleet?select=id,fh,fc&order=id.asc'
+    );
+
+    fleetBody.replaceChildren();
+
+    if (!rows.length) {
+      fleetBody.innerHTML =
+        '<tr><td colspan="3">No aircraft found</td></tr>';
+      return;
+    }
+
+    for (const a of rows) {
+      const tr = document.createElement('tr');
+
+      for (const value of [
+        a.id,
+        Number(a.fh).toFixed(2),
+        a.fc
+      ]) {
+        const td = document.createElement('td');
+        td.textContent = String(value);
+        tr.appendChild(td);
+      }
+
+      fleetBody.appendChild(tr);
+    }
+
+    status('Fleet data updated');
+  } catch (error) {
+    status('Unable to load fleet: ' + error.message, true);
+  }
+}
+
+document.getElementById('refresh')
+  .addEventListener('click', loadFleet);
+
+document.getElementById('update')
+  .addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const aircraft =
+      document.getElementById('aircraft').value;
+    const fh =
+      Number(document.getElementById('fh').value);
+    const fc =
+      Number(document.getElementById('fc').value);
+
+    if (
+      !Number.isFinite(fh) ||
+      !Number.isSafeInteger(fc) ||
+      fh < 0 ||
+      fc < 0 ||
+      (fh === 0 && fc === 0)
+    ) {
+      status('Enter valid additional FH or FC', true);
+      return;
+    }
+
+    submitButton.disabled = true;
+    status('Saving update...');
+
+    try {
+      const response = await fetch(
+        SUPABASE_URL +
+        '/rest/v1/rpc/add_fleet_utilization',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            p_aircraft: aircraft,
+            p_fh: fh,
+            p_fc: fc
+          })
+        }
+      );
+
+      if (!response.ok) {
+        let message = 'HTTP ' + response.status;
+        try {
+          const err = await response.json();
+          message = err.message || message;
+        } catch {}
+        throw new Error(message);
+      }
+
+      event.target.reset();
+      await loadFleet();
+      status('Aircraft utilization updated successfully');
+
+    } catch (error) {
+      status('Update failed: ' + error.message, true);
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+
+loadFleet();
+setInterval(loadFleet, 30000);
+</script>
+</body>
+</html>
