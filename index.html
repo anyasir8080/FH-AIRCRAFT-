@@ -26,12 +26,19 @@ button:disabled{opacity:.5;cursor:wait}
 <p id="status" role="status"></p>
 </section>
 <section>
+<h2>Fleet Editor Sign-in</h2>
+<form id="login"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required>
+<label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+<button type="submit">Sign in</button></form>
+<button id="logout" type="button" hidden>Sign out</button><p id="login-status" role="status"></p>
+</section>
+<section>
 <h2>Update Utilization</h2>
 <form id="update">
 <label for="aircraft">Aircraft</label><select id="aircraft" required></select>
 <label for="fh">Additional FH</label><input id="fh" type="number" min="0" step="0.01" required>
 <label for="fc">Additional FC</label><input id="fc" type="number" min="0" step="1" required>
-<button id="submit" type="submit">Update Aircraft</button>
+<button id="submit" type="submit" disabled>Update Aircraft</button>
 </form>
 </section>
 <section>
@@ -43,7 +50,7 @@ button:disabled{opacity:.5;cursor:wait}
 <input id="initial-fh" type="number" min="0" step="0.01" value="0" required>
 <label for="initial-fc">Initial FC</label>
 <input id="initial-fc" type="number" min="0" step="1" value="0" required>
-<button id="add-submit" type="submit">Add Aircraft</button>
+<button id="add-submit" type="submit" disabled>Add Aircraft</button>
 <p id="add-status" role="status"></p>
 </form>
 </section>
@@ -56,7 +63,39 @@ const aircraftSelect=document.getElementById('aircraft');
 const statusEl=document.getElementById('status');
 const form=document.getElementById('update');
 const submitBtn=document.getElementById('submit');
-let db;
+let db, canWrite=false, savingUpdate=false, savingAircraft=false;
+const login=document.getElementById('login');
+const logout=document.getElementById('logout');
+const loginStatus=document.getElementById('login-status');
+const addButton=document.getElementById('add-submit');
+function renderWriteControls(){
+ submitBtn.disabled=!canWrite||savingUpdate;
+ addButton.disabled=!canWrite||savingAircraft;
+}
+function showSession(session){
+ canWrite=session?.user?.app_metadata?.fleet_writer===true && session.user.is_anonymous!==true;
+ login.hidden=Boolean(session);
+ logout.hidden=!session;
+ loginStatus.textContent=canWrite?'Signed in as fleet editor.':session?'This account has read-only access.':'Sign in with an authorized account to edit the fleet.';
+ renderWriteControls();
+}
+login.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const button=login.querySelector('button');
+ button.disabled=true;
+ try{
+  const {error}=await db.auth.signInWithPassword({email:login.elements.email.value.trim(),password:login.elements.password.value});
+  if(error)throw error;
+  login.reset();
+ }catch(error){loginStatus.textContent='Sign-in failed: '+error.message}
+ finally{button.disabled=false}
+});
+logout.addEventListener('click',async ()=>{
+ try{
+  const {error}=await db.auth.signOut({scope:'local'});
+  if(error)throw error;
+ }catch(error){loginStatus.textContent='Sign-out failed: '+error.message}
+});
 function status(message,isError=false){statusEl.textContent=message;statusEl.className=isError?'error':'success'}
 async function loadFleet(){
  status('Loading fleet data...');
@@ -64,6 +103,7 @@ async function loadFleet(){
   if(!db)throw new Error('Supabase library unavailable');
   const {data,error}=await db.from('fleet').select('aircraft,fh,fc,updated_at').order('aircraft');
   if(error)throw error;
+  const selected=aircraftSelect.value;
   fleetBody.replaceChildren();aircraftSelect.replaceChildren();
   for(const a of data||[]){
    const tr=document.createElement('tr');
@@ -73,6 +113,7 @@ async function loadFleet(){
    fleetBody.appendChild(tr);
    const option=document.createElement('option');option.value=a.aircraft;option.textContent=a.aircraft;aircraftSelect.appendChild(option);
   }
+  if(data?.some(row=>row.aircraft===selected))aircraftSelect.value=selected;
   if(!data?.length)fleetBody.innerHTML='<tr><td colspan="3">No aircraft found</td></tr>';
   status('Fleet data loaded successfully.');
  }catch(err){
@@ -89,31 +130,15 @@ form.addEventListener('submit',async e=>{
  if(!aircraft||!/^\d+(\.\d{1,2})?$/.test(fhText)||!/^\d+$/.test(fcText)||!Number.isSafeInteger(addFC)||(addFH===0&&addFC===0)){
   status('Enter valid additional FH (up to 2 decimals) and whole FC.',true);return;
  }
- submitBtn.disabled=true;status('Saving update...');
+ if(!canWrite||savingUpdate)return;
+ savingUpdate=true;renderWriteControls();status('Saving update...');
  try{
-  const {data,error}=await db.rpc('add_fleet_utilization',{p_aircraft:aircraft,p_fh:addFH,p_fc:addFC});
-  if(error){
-   // PGRST202: function is absent from the exposed PostgREST schema.
-   if(error.code!=='PGRST202')throw error;
-   const {data:current,error:readError}=await db.from('fleet')
-     .select('aircraft,fh,fc,updated_at').eq('aircraft',aircraft).single();
-   if(readError)throw readError;
-   const nextFH=Math.round((Number(current.fh)+addFH)*100)/100;
-   const nextFC=Number(current.fc)+addFC;
-   if(!Number.isSafeInteger(nextFC)||!Number.isFinite(nextFH))
-    throw new Error('Updated utilization is outside the supported range');
-   // Optimistic concurrency check: reject stale edits instead of overwriting them.
-   let update=db.from('fleet').update({fh:nextFH,fc:nextFC})
-     .eq('aircraft',aircraft);
-   update=current.updated_at===null?update.is('updated_at',null):update.eq('updated_at',current.updated_at);
-   const {data:changed,error:writeError}=await update.select('aircraft');
-   if(writeError)throw writeError;
-   if(!changed?.length)throw new Error('Update was not applied. Refresh and retry; check anonymous UPDATE policy if this persists.');
-  }else if(data===false)throw new Error('Aircraft not found');
+  const {error}=await db.rpc('add_fleet_utilization',{p_aircraft_id:aircraft,p_fh:addFH,p_fc:addFC});
+  if(error)throw error;
   form.reset();await loadFleet();
   if(!statusEl.classList.contains('error'))status('Aircraft utilization updated successfully.');
  }catch(err){status('Update failed: '+err.message,true)}
- finally{submitBtn.disabled=false}
+ finally{savingUpdate=false;renderWriteControls()}
 });
 document.getElementById('add-aircraft').addEventListener('submit',async e=>{
  e.preventDefault();
@@ -121,7 +146,6 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
  const fhText=document.getElementById('initial-fh').value;
  const fcText=document.getElementById('initial-fc').value;
  const addStatus=document.getElementById('add-status');
- const button=document.getElementById('add-submit');
  const show=(message,error=false)=>{addStatus.textContent=message;addStatus.className=error?'error':'success'};
  if(!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(registration)||
     !/^\d+(\.\d{1,2})?$/.test(fhText)||
@@ -129,7 +153,8 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
     !Number.isSafeInteger(Number(fcText))){
   show('Enter a valid registration, FH (maximum 2 decimals), and whole FC.',true);return;
  }
- button.disabled=true;show('Adding aircraft...');
+ if(!canWrite||savingAircraft)return;
+ savingAircraft=true;renderWriteControls();show('Adding aircraft...');
  try{
   if(!db)throw new Error('Supabase connection unavailable');
   const {data:existing,error:lookupError}=await db.from('fleet')
@@ -150,11 +175,15 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
   if(statusEl.classList.contains('error'))throw new Error('Aircraft saved, but the fleet could not be refreshed.');
   show('Aircraft added successfully.');
  }catch(err){show('Unable to add aircraft: '+err.message,true)}
- finally{button.disabled=false}
+ finally{savingAircraft=false;renderWriteControls()}
 });
 document.getElementById('refresh').addEventListener('click',loadFleet);
 try{
- db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+ db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{detectSessionInUrl:false}});
+ db.auth.onAuthStateChange((_event,session)=>showSession(session));
+ const refreshWhenIdle=()=>{if(!document.hidden&&!savingAircraft&&!savingUpdate)loadFleet()};
+ window.addEventListener('focus',refreshWhenIdle);
+ setInterval(refreshWhenIdle,30000);
 }catch(err){status('Connection initialization failed: '+err.message,true)}
 loadFleet();
 </script>
