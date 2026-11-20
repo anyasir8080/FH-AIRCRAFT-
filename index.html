@@ -26,7 +26,9 @@ button:disabled{opacity:.5;cursor:wait}
 <p id="status" role="status"></p>
 </section>
 <section>
-<h2>Fleet Editor Sign-in</h2>
+<h2>Update Utilization</h2>
+<details id="editor-access">
+<summary>Editor sign-in for FH and FC updates</summary>
 <form id="login"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required>
 <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
 <button type="submit">Sign in with password</button></form>
@@ -40,9 +42,7 @@ button:disabled{opacity:.5;cursor:wait}
 <button type="submit">Save new password</button>
 </form>
 <button id="logout" type="button" hidden>Sign out</button><p id="login-status" role="status"></p>
-</section>
-<section>
-<h2>Update Utilization</h2>
+</details>
 <form id="update">
 <label for="aircraft">Aircraft</label><select id="aircraft" required></select>
 <label for="fh">Additional FH</label><input id="fh" type="number" min="0" step="0.01" required>
@@ -59,7 +59,7 @@ button:disabled{opacity:.5;cursor:wait}
 <input id="initial-fh" type="number" min="0" step="0.01" value="0" required>
 <label for="initial-fc">Initial FC</label>
 <input id="initial-fc" type="number" min="0" step="1" value="0" required>
-<button id="add-submit" type="submit" disabled>Add Aircraft</button>
+<button id="add-submit" type="submit">Add Aircraft</button>
 <p id="add-status" role="status"></p>
 </form>
 </section>
@@ -85,7 +85,7 @@ const loginStatus=document.getElementById('login-status');
 const addButton=document.getElementById('add-submit');
 function renderWriteControls(){
  submitBtn.disabled=!canWrite||savingUpdate;
- addButton.disabled=!canWrite||savingAircraft;
+ addButton.disabled=savingAircraft;
 }
 function showSession(session){
  canWrite=!recoveryPending&&!recovering&&session?.user?.app_metadata?.fleet_writer===true && session.user.is_anonymous!==true;
@@ -93,8 +93,9 @@ function showSession(session){
  forgotPassword.hidden=login.hidden;
  emailLink.hidden=login.hidden;
  resetPassword.hidden=!recovering;
+ if(recovering||recoveryPending)document.getElementById('editor-access').open=true;
  logout.hidden=!session||recovering||recoveryPending;
- loginStatus.textContent=recovering?'Choose a new password.':recoveryPending?'Checking your reset link…':canWrite?'Signed in as fleet editor.':session?'This account has read-only access.':'Sign in with an authorized account to edit the fleet.';
+ loginStatus.textContent=recovering?'Choose a new password.':recoveryPending?'Checking your reset link…':canWrite?'Signed in as fleet editor.':session?'This account has read-only access.':'Sign in with an authorized account to update FH and FC.';
  renderWriteControls();
 }
 login.addEventListener('submit',async event=>{
@@ -225,7 +226,7 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
     !Number.isSafeInteger(Number(fcText))){
   show('Enter a valid registration, FH (maximum 2 decimals), and whole FC.',true);return;
  }
- if(!canWrite||savingAircraft)return;
+ if(savingAircraft)return;
  savingAircraft=true;renderWriteControls();show('Adding aircraft...');
  try{
   if(!db)throw new Error('Supabase connection unavailable');
