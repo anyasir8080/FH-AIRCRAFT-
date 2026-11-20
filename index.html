@@ -124,8 +124,8 @@ document.getElementById('add-aircraft').addEventListener('submit',async e=>{
  const button=document.getElementById('add-submit');
  const show=(message,error=false)=>{addStatus.textContent=message;addStatus.className=error?'error':'success'};
  if(!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(registration)||
-    !/^\\d+(\\.\\d{1,2})?$/.test(fhText)||
-    !/^\\d+$/.test(fcText)||
+    !/^\d+(\.\d{1,2})?$/.test(fhText)||
+    !/^\d+$/.test(fcText)||
     !Number.isSafeInteger(Number(fcText))){
   show('Enter a valid registration, FH (maximum 2 decimals), and whole FC.',true);return;
  }
