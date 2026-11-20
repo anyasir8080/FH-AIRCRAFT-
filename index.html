@@ -1,35 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FLEET FH & FC</title>
-<style>
-*{box-sizing:border-box}
-body{font-family:Arial;background:#edf5f1;margin:0;padding:20px;color:#164b39}
-header{background:#086448;color:white;padding:24px;border-radius:15px}
-section{background:white;padding:20px;margin-top:20px;border-radius:15px}
-table{width:100%;border-collapse:collapse}
-td,th{padding:14px 6px;text-align:center;border-bottom:1px solid #ddd}
-input,select,button{width:100%;padding:13px;margin:8px 0;border:1px solid #ccc;border-radius:8px;font-size:16px}
-button{background:#086448;color:white;border:0}
-</style>
-</head>
-<body>
-<header><small>IRAQI AIRWAYS | DEMO</small><h1>FLEET FH & FC</h1><p>Continuing Airworthiness Management</p></header>
-<section><h2>Fleet Overview</h2>
-<table><thead><tr><th>Aircraft</th><th>FH</th><th>FC</th></tr></thead><tbody id="fleet"></tbody></table></section>
-<section><h2>Update Utilization</h2>
-<form id="update">
-<select id="aircraft"><option>YI-ASM</option><option>YI-ASN</option><option>YI-ASO</option></select>
-<label>Additional FH</label><input id="fh" type="number" min="0" step="0.01" required>
-<label>Additional FC</label><input id="fc" type="number" min="0" step="1" required>
-<button type="submit">Update Aircraft</button></form></section>
-<script>
-let data=JSON.parse(localStorage.getItem('fleet-demo')||'null')||[{id:'YI-ASM',fh:4250,fc:1820},{id:'YI-ASN',fh:3100,fc:1460},{id:'YI-ASO',fh:2800,fc:1250}];
-function render(){document.getElementById('fleet').innerHTML=data.map(a=>'<tr><td>'+a.id+'</td><td>'+a.fh.toFixed(2)+'</td><td>'+a.fc+'</td></tr>').join('');}
-document.getElementById('update').onsubmit=e=>{e.preventDefault();let a=data.find(a=>a.id===document.getElementById('aircraft').value);a.fh+=Number(document.getElementById('fh').value);a.fc+=Number(document.getElementById('fc').value);localStorage.setItem('fleet-demo',JSON.stringify(data));render();e.target.reset();};
-render();
-</script>
-</body>
-</html>
+
+
+const SUPABASE_URL =
+  'https://jlyizhbwjupczzsxvzaf.supabase.co';
+
+const SUPABASE_PUBLISHABLE_KEY =
+  'sb_publishable_ccIV5Gkbjg2y5oMd90mMeg_-5bKNRCb';
