@@ -34,6 +34,19 @@ button:disabled{opacity:.5;cursor:wait}
 <button id="submit" type="submit">Update Aircraft</button>
 </form>
 </section>
+<section>
+<h2>Add New Aircraft</h2>
+<form id="add-aircraft">
+<label for="new-aircraft">Aircraft Registration</label>
+<input id="new-aircraft" type="text" maxlength="20" placeholder="YI-ABC" autocapitalize="characters" required>
+<label for="initial-fh">Initial FH</label>
+<input id="initial-fh" type="number" min="0" step="0.01" value="0" required>
+<label for="initial-fc">Initial FC</label>
+<input id="initial-fc" type="number" min="0" step="1" value="0" required>
+<button id="add-submit" type="submit">Add Aircraft</button>
+<p id="add-status" role="status"></p>
+</form>
+</section>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const SUPABASE_URL='https://jlyizhbwjupczzsxvzaf.supabase.co';
@@ -101,6 +114,43 @@ form.addEventListener('submit',async e=>{
   if(!statusEl.classList.contains('error'))status('Aircraft utilization updated successfully.');
  }catch(err){status('Update failed: '+err.message,true)}
  finally{submitBtn.disabled=false}
+});
+document.getElementById('add-aircraft').addEventListener('submit',async e=>{
+ e.preventDefault();
+ const registration=document.getElementById('new-aircraft').value.trim().toUpperCase();
+ const fhText=document.getElementById('initial-fh').value;
+ const fcText=document.getElementById('initial-fc').value;
+ const addStatus=document.getElementById('add-status');
+ const button=document.getElementById('add-submit');
+ const show=(message,error=false)=>{addStatus.textContent=message;addStatus.className=error?'error':'success'};
+ if(!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(registration)||
+    !/^\\d+(\\.\\d{1,2})?$/.test(fhText)||
+    !/^\\d+$/.test(fcText)||
+    !Number.isSafeInteger(Number(fcText))){
+  show('Enter a valid registration, FH (maximum 2 decimals), and whole FC.',true);return;
+ }
+ button.disabled=true;show('Adding aircraft...');
+ try{
+  if(!db)throw new Error('Supabase connection unavailable');
+  const {data:existing,error:lookupError}=await db.from('fleet')
+    .select('aircraft').eq('aircraft',registration).limit(1);
+  if(lookupError)throw lookupError;
+  if(existing?.length)throw new Error('This aircraft already exists.');
+  const {error}=await db.from('fleet').insert({
+   aircraft:registration,fh:Number(fhText),fc:Number(fcText)
+  });
+  if(error){
+   if(error.code==='23505')throw new Error('This aircraft already exists.');
+   throw error;
+  }
+  e.target.reset();
+  document.getElementById('initial-fh').value='0';
+  document.getElementById('initial-fc').value='0';
+  await loadFleet();
+  if(statusEl.classList.contains('error'))throw new Error('Aircraft saved, but the fleet could not be refreshed.');
+  show('Aircraft added successfully.');
+ }catch(err){show('Unable to add aircraft: '+err.message,true)}
+ finally{button.disabled=false}
 });
 document.getElementById('refresh').addEventListener('click',loadFleet);
 try{
